@@ -83,7 +83,9 @@ layer = L.geoJSON(geojson, {
   onEachFeature: function(f, l) {
     var p = f.properties, has = p.trade_partner_name;
     if (p.ISO_A3) layerMap[p.ISO_A3] = l;
-    l.bindTooltip("<div class=nm>" + (p.NAM_0 || '') + "</div>" + (has ? "<div class=dt>" + p.trade_partner_name + " (" + p.trade_partner_code + ")</div>" : ""), { className: "country-label", sticky: true });
+    if (!L.Browser.mobile) {
+      l.bindTooltip("<div class=nm>" + (p.NAM_0 || '') + "</div>" + (has ? "<div class=dt>" + p.trade_partner_name + " (" + p.trade_partner_code + ")</div>" : ""), { className: "country-label", sticky: true });
+    }
     l.on("click", function() { selectCountry(p.ISO_A3, false); });
     l.on("mouseover", function() { this.setStyle({ fillOpacity: 0.9, weight: 1.5 }); this.bringToFront(); });
     l.on("mouseout", function() { if (p.ISO_A3 && p.ISO_A3 === previousHighlight) return; layer.resetStyle(this); });
