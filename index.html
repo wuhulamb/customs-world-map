@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>世界贸易伙伴地图</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; font-family: -apple-system, "Microsoft YaHei", sans-serif; }
+#map { width: 100%; height: 100%; background: #b3d4f0; }
+.info-panel {
+  position: absolute; top: 20px; right: 20px; z-index: 1000;
+  background: rgba(255,255,255,0.95); padding: 16px 20px; border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15); min-width: 200px;
+}
+.info-panel h3 { font-size: 18px; margin-bottom: 8px; border-bottom: 2px solid #e68a2e; padding-bottom: 6px; }
+.info-panel .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+.legend {
+  position: absolute; bottom: 30px; left: 20px; z-index: 1000;
+  background: rgba(255,255,255,0.9); padding: 10px 14px; border-radius: 6px;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.12); font-size: 13px; line-height: 1.6;
+}
+.legend .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.legend .dot.yes { background: #e68a2e; }
+.legend .dot.no { background: #e0e0e0; border: 1px solid #bbb; }
+.search-container {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1000;
+  width: 320px; max-width: 90%;
+}
+.search-container input {
+  width: 100%; padding: 10px 14px; border: none; border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15); font-size: 14px;
+  font-family: -apple-system, "Microsoft YaHei", sans-serif; outline: none;
+  background: rgba(255,255,255,0.95);
+}
+.search-container input::placeholder { color: #aaa; }
+.search-results {
+  position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px;
+  background: rgba(255,255,255,0.97); border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15); max-height: 260px; overflow-y: auto;
+  display: none;
+}
+.search-results .result-item {
+  padding: 8px 14px; cursor: pointer; font-size: 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.search-results .result-item:last-child { border-bottom: none; }
+.search-results .result-item:hover { background: #e68a2e; color: #fff; }
+.search-results .result-item.selected { background: #e68a2e; color: #fff; }
+.country-label { background: rgba(0,0,0,0.75); border: none; border-radius: 4px; color: #fff; padding: 6px 10px; box-shadow: 0 1px 6px rgba(0,0,0,0.3); }
+.country-label .nm { font-weight: 600; }
+.country-label .dt { font-size: 12px; opacity: 0.8; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="search-container">
+  <input type="text" id="search-input" placeholder="搜索国家名称..." autocomplete="off">
+  <div class="search-results" id="search-results"></div>
+</div>
+<div class="info-panel">
+  <h3 id="cname">世界贸易伙伴</h3>
+  <div class="row"><span>贸易伙伴名称</span><span id="tname">—</span></div>
+  <div class="row"><span>贸易伙伴编码</span><span id="tcode">—</span></div>
+</div>
+<div class="legend">
+  <div><span class="dot yes"></span>有贸易数据</div>
+  <div><span class="dot no"></span>无贸易数据</div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/topojson-client@3"></script>
+<script src="world_data.js"></script>
+<script>
+var map = L.map("map", { center: [20, 0], zoom: 2, minZoom: 1, worldCopyJump: true });
+var layerMap = {};
+var previousHighlight = null;
+var layer, geojson;
+
+geojson = topojson.feature(worldTopo, worldTopo.objects.World_Bank_Official_Boundaries_Admin_0);
+layer = L.geoJSON(geojson, {
+  style: function(f) { return { fillColor: f.properties.trade_partner_name ? "#e68a2e" : "#e0e0e0", color: "#fff", weight: 1, fillOpacity: 0.8 }; },
+  onEachFeature: function(f, l) {
+    var p = f.properties, has = p.trade_partner_name;
+    if (p.ISO_A3) layerMap[p.ISO_A3] = l;
+    l.bindTooltip("<div class=nm>" + (p.NAM_0 || '') + "</div>" + (has ? "<div class=dt>" + p.trade_partner_name + " (" + p.trade_partner_code + ")</div>" : ""), { className: "country-label", sticky: true });
+    l.on("click", function() { selectCountry(p.ISO_A3, false); });
+    l.on("mouseover", function() { this.setStyle({ fillOpacity: 0.9, weight: 1.5 }); this.bringToFront(); });
+    l.on("mouseout", function() { if (p.ISO_A3 && p.ISO_A3 === previousHighlight) return; layer.resetStyle(this); });
+  }
+}).addTo(map);
+
+// Build search index (English + Chinese)
+var countryIndex = [];
+geojson.features.forEach(function(f) {
+  var en = f.properties.NAM_0 || '';
+  var cn = f.properties.trade_partner_name || '';
+  var keys = [];
+  if (en) keys.push(en.toLowerCase());
+  if (cn) keys.push(cn);
+  var displayName = en;
+  if (cn) displayName = cn + ' (' + en + ')';
+  countryIndex.push({ name: displayName, keys: keys, iso3: f.properties.ISO_A3 || '' });
+});
+
+function searchCountries(query) {
+  var q = query.trim().toLowerCase();
+  if (q.length === 0) return [];
+  var results = [];
+  countryIndex.forEach(function(entry) {
+    for (var k = 0; k < entry.keys.length; k++) {
+      if (entry.keys[k].indexOf(q) !== -1) { results.push(entry); break; }
+    }
+  });
+  return results.slice(0, 10);
+}
+
+function renderResults(results) {
+  var container = document.getElementById('search-results');
+  container.innerHTML = '';
+  if (results.length === 0) { container.style.display = 'none'; return; }
+  results.forEach(function(r) {
+    var div = document.createElement('div');
+    div.className = 'result-item';
+    div.textContent = r.name;
+    div.dataset.iso3 = r.iso3;
+    div.addEventListener('click', function(e) {
+      selectCountry(r.iso3, true);
+      container.style.display = 'none';
+      document.getElementById('search-input').value = r.name;
+    });
+    container.appendChild(div);
+  });
+  container.style.display = 'block';
+}
+
+function selectCountry(iso3, zoomTo) {
+  if (previousHighlight && layerMap[previousHighlight]) {
+    layer.resetStyle(layerMap[previousHighlight]);
+  }
+  var targetLayer = layerMap[iso3];
+  if (!targetLayer) return;
+  var feature = null;
+  for (var i = 0; i < geojson.features.length; i++) {
+    if (geojson.features[i].properties.ISO_A3 === iso3) { feature = geojson.features[i]; break; }
+  }
+  if (!feature) return;
+  targetLayer.setStyle({ fillColor: '#ff6600', color: '#ff3300', weight: 3, fillOpacity: 0.9 });
+  targetLayer.bringToFront();
+  if (zoomTo) {
+    map.fitBounds(targetLayer.getBounds(), { padding: [30, 30], maxZoom: 6 });
+  }
+  var p = feature.properties;
+  document.getElementById("cname").textContent = p.NAM_0 || "未知";
+  document.getElementById("tname").textContent = p.trade_partner_name || "—";
+  document.getElementById("tcode").textContent = p.trade_partner_code || "—";
+  previousHighlight = iso3;
+}
+
+document.getElementById('search-input').addEventListener('input', function() {
+  var results = searchCountries(this.value);
+  renderResults(results);
+});
+document.getElementById('search-input').addEventListener('keydown', function(e) {
+  var items = document.querySelectorAll('#search-results .result-item');
+  var sel = document.querySelector('#search-results .result-item.selected');
+  var idx = sel ? Array.from(items).indexOf(sel) : -1;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (items.length === 0) return;
+    if (sel) sel.classList.remove('selected');
+    idx = (idx + 1) % items.length;
+    items[idx].classList.add('selected');
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (items.length === 0) return;
+    if (sel) sel.classList.remove('selected');
+    idx = (idx - 1 + items.length) % items.length;
+    items[idx].classList.add('selected');
+  } else if (e.key === 'Enter') {
+    if (sel) { sel.click(); }
+    else if (items.length > 0) { items[0].click(); }
+  }
+});
+document.getElementById('search-input').addEventListener('blur', function() {
+  setTimeout(function() { document.getElementById('search-results').style.display = 'none'; }, 200);
+});
+
+map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+</script>
+</body>
+</html>
