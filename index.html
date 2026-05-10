@@ -82,19 +82,26 @@ layer = L.geoJSON(geojson, {
   style: function(f) { return { fillColor: f.properties.trade_partner_name ? "#e68a2e" : "#e0e0e0", color: "#fff", weight: 1, fillOpacity: 0.8 }; },
   onEachFeature: function(f, l) {
     var p = f.properties, has = p.trade_partner_name;
-    if (p.ISO_A3) layerMap[p.ISO_A3] = l;
+    if (p.ISO_A3) {
+      layerMap[p.ISO_A3] = layerMap[p.ISO_A3] || [];
+      layerMap[p.ISO_A3].push(l);
+    }
     if (!L.Browser.mobile) {
       l.bindTooltip("<div class=nm>" + (p.NAM_0 || '') + "</div>" + (has ? "<div class=dt>" + p.trade_partner_name + " (" + p.trade_partner_code + ")</div>" : ""), { className: "country-label", sticky: true });
     }
     l.on("click", function() { selectCountry(p.ISO_A3, false); });
     l.on("mouseover", function() { this.setStyle({ fillOpacity: 0.9, weight: 1.5 }); this.bringToFront(); });
-    l.on("mouseout", function() { if (p.ISO_A3 && p.ISO_A3 === previousHighlight) return; layer.resetStyle(this); });
+    l.on("mouseout", function() { if (p.ISO_A3 && previousHighlight === p.ISO_A3) return; layer.resetStyle(this); });
   }
 }).addTo(map);
 
 // Build search index (English + Chinese)
 var countryIndex = [];
+var seenISO = {};
 geojson.features.forEach(function(f) {
+  var iso3 = f.properties.ISO_A3 || '';
+  if (seenISO[iso3]) return;
+  seenISO[iso3] = true;
   var en = f.properties.NAM_0 || '';
   var cn = f.properties.trade_partner_name || '';
   var keys = [];
@@ -102,7 +109,7 @@ geojson.features.forEach(function(f) {
   if (cn) keys.push(cn);
   var displayName = en;
   if (cn) displayName = cn + ' (' + en + ')';
-  countryIndex.push({ name: displayName, keys: keys, iso3: f.properties.ISO_A3 || '' });
+  countryIndex.push({ name: displayName, keys: keys, iso3: iso3 });
 });
 
 function searchCountries(query) {
@@ -138,21 +145,19 @@ function renderResults(results) {
 
 function selectCountry(iso3, zoomTo) {
   if (previousHighlight && layerMap[previousHighlight]) {
-    layer.resetStyle(layerMap[previousHighlight]);
+    layerMap[previousHighlight].forEach(function(l) { layer.resetStyle(l); });
   }
-  var targetLayer = layerMap[iso3];
-  if (!targetLayer) return;
-  var feature = null;
-  for (var i = 0; i < geojson.features.length; i++) {
-    if (geojson.features[i].properties.ISO_A3 === iso3) { feature = geojson.features[i]; break; }
+  var targetLayers = layerMap[iso3];
+  if (!targetLayers) return;
+  targetLayers.forEach(function(l) {
+    l.setStyle({ fillColor: '#ff6600', color: '#ff3300', weight: 3, fillOpacity: 0.9 });
+    l.bringToFront();
+  });
+  if (zoomTo && targetLayers.length > 0) {
+    var group = L.featureGroup(targetLayers);
+    map.fitBounds(group.getBounds(), { padding: [30, 30], maxZoom: 6 });
   }
-  if (!feature) return;
-  targetLayer.setStyle({ fillColor: '#ff6600', color: '#ff3300', weight: 3, fillOpacity: 0.9 });
-  targetLayer.bringToFront();
-  if (zoomTo) {
-    map.fitBounds(targetLayer.getBounds(), { padding: [30, 30], maxZoom: 6 });
-  }
-  var p = feature.properties;
+  var p = targetLayers[0].feature.properties;
   document.getElementById("cname").textContent = p.NAM_0 || "未知";
   document.getElementById("tname").textContent = p.trade_partner_name || "—";
   document.getElementById("tcode").textContent = p.trade_partner_code || "—";
