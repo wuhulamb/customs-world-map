@@ -104,11 +104,14 @@ geojson.features.forEach(function(f) {
   seenISO[iso3] = true;
   var en = f.properties.NAM_0 || '';
   var cn = f.properties.trade_partner_name || '';
+  var code = f.properties.trade_partner_code || '';
   var keys = [];
   if (en) keys.push(en.toLowerCase());
   if (cn) keys.push(cn);
+  if (code) keys.push(code);
   var displayName = en;
   if (cn) displayName = cn + ' (' + en + ')';
+  if (code) displayName += ' [' + code + ']';
   countryIndex.push({ name: displayName, keys: keys, iso3: iso3 });
 });
 
